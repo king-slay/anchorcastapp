@@ -56,6 +56,29 @@ args = parser.parse_args()
 # [SEC-F8] Secret enforcement
 WHISPER_SECRET = args.secret or os.environ.get('WHISPER_SECRET', '')
 
+# ── Reference detection ───────────────────────────────────────────────────────
+# Spoken Bible references are read by scripture_parser (from Live Scripture
+# Assistant, with its own tests), not by the renderer's regexes. The bundled
+# Python's ._pth file leaves this folder off sys.path, so add it. If the
+# package is missing, /detect answers 503 and the app falls back to its own
+# detection; transcription is unaffected.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from scripture_parser.detector import Detector
+    _detector = Detector()
+except Exception as _e:  # never stop transcription over it
+    print(f'[Whisper] Reference detection unavailable: {_e}', flush=True)
+    _detector = None
+_detect_lock = threading.Lock()
+
+
+def detect_references(text, reset=False):
+    with _detect_lock:
+        if reset:
+            _detector.reset()
+        heard = _detector.hear(text) if text else []
+    return [h.as_json() for h in heard]
+
 # [SEC-F9] Max audio payload (10 MB)
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
@@ -776,6 +799,22 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             self._json(400, {'error': 'invalid body'})
+            return
+
+        # /detect — Bible references in one transcript line, using what came
+        # before ("John chapter 3." then "Verse 16."). {"reset": true} starts over.
+        if self.path == '/detect':
+            if _detector is None:
+                self._json(503, {'error': 'reference detection unavailable'}); return
+            length = int(self.headers.get('Content-Length', 0))
+            if not length or length > 8192:
+                self._json(400, {'error': 'invalid body'}); return
+            try:
+                data = json.loads(self.rfile.read(length))
+                text = str(data.get('text', ''))[:2000]
+                self._json(200, {'references': detect_references(text, bool(data.get('reset')))})
+            except (ValueError, AttributeError):
+                self._json(400, {'error': 'invalid body'})
             return
 
         if self.path != '/transcribe':

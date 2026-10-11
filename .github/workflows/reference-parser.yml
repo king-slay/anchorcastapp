@@ -1,0 +1,28 @@
+name: Reference parser
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # the bundled Python is 3.12.8
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax of the changed scripts
+        run: |
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer/js/ai-detection.js
+          node --check src/renderer/js/electron-shim.js

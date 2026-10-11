@@ -85,9 +85,20 @@ function saveRegistration(data) {
   } catch(_) {}
 }
 
+const OFFLINE_NO_REGISTRATION = true;
+
 function getRegistrationStatus() {
   const hwId = getHardwareId();
   const data = loadRegistration();
+  // This copy runs offline in church: no registration email, and nothing
+  // (transcription, remote control, NDI) waits on one.
+  if (OFFLINE_NO_REGISTRATION) {
+    return {
+      registered: true, hwId,
+      fullName: data?.fullName || '', email: data?.email || '',
+      registeredAt: data?.registeredAt || null, churchName: data?.churchName || '',
+    };
+  }
   if (data?.registered && data?.token && data?.email) {
     if (verifyRegToken(data.token, data.email, hwId)) {
       return {
@@ -6249,6 +6260,25 @@ ipcMain.handle('whisper-reinforce', async (_, { text, ttl = 30 } = {}) => {
       signal: AbortSignal.timeout(2000),
     });
     return { ok: res.ok };
+  } catch (_) {
+    return { ok: false };
+  }
+});
+// Bible references in one transcript line, read by scripture_parser in the
+// speech server. { ok: false } when the server isn't running, so the
+// renderer falls back to its own detection.
+ipcMain.handle('whisper-detect', async (_, { text, reset = false } = {}) => {
+  if (!whisperReady) return { ok: false };
+  try {
+    const res = await fetch(`${WHISPER_URL}/detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Whisper-Secret': WHISPER_SECRET },
+      body: JSON.stringify({ text: String(text || '').slice(0, 2000), reset: !!reset }),
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) return { ok: false };
+    const data = await res.json();
+    return { ok: true, references: Array.isArray(data.references) ? data.references : [] };
   } catch (_) {
     return { ok: false };
   }
