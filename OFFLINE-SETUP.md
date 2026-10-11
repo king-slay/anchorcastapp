@@ -14,13 +14,20 @@ Internet is needed once, for the setup below; after that the app runs offline.
    git clone https://github.com/king-slay/anchorcastapp.git
    cd anchorcastapp
    git checkout claude/our-reference-parser
-   npm install
+   npm.cmd install
+   node node_modules\electron\install.js
    .\setup_whisper.bat
    ```
 
+   Use `npm.cmd` rather than `npm`: Windows often blocks plain `npm` with
+   "running scripts is disabled". Newer npm (11.19 and later) skips
+   Electron's own download step and says so in an `install-scripts`
+   warning; the `node ... install.js` line runs that step.
+   `Test-Path node_modules\electron\dist\electron.exe` should print `True`.
+
    `setup_whisper.bat` downloads Python 3.12 and faster-whisper into a
    `python` folder next to the app.
-3. Start the app with `npm start`.
+3. Start the app with `npm.cmd start`.
 4. **Speech model:** Settings › AI & Transcription › Local Whisper Model, choose **Tiny English**
    (tiny.en) on a laptop like the Dell, and download it. Use Base or Small
    English on a stronger computer.
@@ -31,7 +38,7 @@ Internet is needed once, for the setup below; after that the app runs offline.
 
 ```powershell
 cd C:\Users\<you>\anchorcastapp
-npm start
+npm.cmd start
 ```
 
 ## Checking the reference parser
