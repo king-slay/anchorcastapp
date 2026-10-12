@@ -266,6 +266,7 @@
     startWhisper: noop,
     stopWhisper: noop,
     reinforceWhisper: noop,
+    detectReferences: async () => ({ ok: false }),
     setWhisperSource: noop,
     pushAudioPcm: noop,
     onTranscript: (cb) => {

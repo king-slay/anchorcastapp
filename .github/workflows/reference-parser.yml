@@ -1,0 +1,63 @@
+name: Reference parser
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # the bundled Python is 3.12.8
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax of the changed scripts
+        run: |
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer/js/ai-detection.js
+          node --check src/renderer/js/electron-shim.js
+
+  speech-setup:
+    # setup_offline.bat on a clean Windows machine, then the speech server
+    # it sets up must answer /detect with our parser.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup_offline.bat
+        shell: cmd
+        run: setup_offline.bat
+      - name: setup_offline.bat again (finished steps are skipped)
+        shell: cmd
+        run: setup_offline.bat
+      - name: Speech server answers /detect, using the model where the app looks
+        shell: pwsh
+        run: |
+          $dir = "$env:APPDATA\AnchorCast\AnchorCastData\WhisperModels"
+          if (-not (Test-Path "$dir\models--Systran--faster-whisper-tiny.en")) { exit 1 }
+          $env:HF_HUB_OFFLINE = '1'  # the model must already be there
+          $p = Start-Process -FilePath python\python.exe -PassThru `
+            -ArgumentList 'whisper_server.py','--model','tiny.en','--port','7777',
+              '--model_cache_dir',"$env:APPDATA\AnchorCast\AnchorCastData\WhisperModels" `
+            -RedirectStandardOutput server.log -RedirectStandardError server.err
+          $up = $false
+          for ($i = 0; $i -lt 60 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:7777/health | Out-Null; $up = $true }
+            catch { Start-Sleep 2 }
+          }
+          Get-Content server.log, server.err
+          if (-not $up) { exit 1 }
+          $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:7777/detect `
+            -ContentType 'application/json' -Body '{"text": "John chapter 3 verse 16."}'
+          $r | ConvertTo-Json -Depth 5
+          Stop-Process $p
+          if ($r.references[0].ref -ne 'John 3:16') { exit 1 }

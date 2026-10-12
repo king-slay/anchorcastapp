@@ -390,10 +390,26 @@ window.AIDetection = (() => {
   // Full-text Bible search when Claude AI is unavailable.
   // Very strict thresholds — this method is inherently noisy because
   // common English words appear throughout the Bible.
+  // Prayer, praise and declarations ("Jesus, Jesus", "in the name of Jesus",
+  // "thank you, Father") share words with hundreds of verses. On a two-hour
+  // service recording they caused about 15 false matches, so content search
+  // needs this many other words in the newest line before it runs.
+  const PRAYER_WORDS = new Set(('jesus christ father lord god holy spirit name amen hallelujah ' +
+    'thank thanks you your we us our i me my in the of and a to for be is it this that pray ' +
+    'praise bless blessed blessing declare decree every all let receive glory power mighty ' +
+    'precious heavenly almighty oh o yes now say said somebody hands hand family families').split(' '));
+  const MIN_OTHER_WORDS = 6;
+
+  function isPrayerLike(text) {
+    const words = String(text || '').toLowerCase().match(/[a-z']+/g) || [];
+    return words.filter(w => !PRAYER_WORDS.has(w)).length < MIN_OTHER_WORDS;
+  }
+
   function detectContentSearch(text) {
     if (!window.BibleDB?.searchVerses) return [];
     const snippet = text.trim().slice(-140);
     if (snippet.split(/\s+/).length < 8) return [];
+    if (isPrayerLike(snippet)) return [];
     const results = window.BibleDB.searchVerses(snippet, 'KJV', 2);
     return results
       .filter(r => r.score >= 18)
@@ -445,6 +461,7 @@ window.AIDetection = (() => {
     // generic fragments ("the flesh. Spirit.") match many unrelated verses
     // that happen to share common words, causing false positives.
     if (!bestPostTrigger || bestPostTrigger.split(/\s+/).length < 8) return [];
+    if (isPrayerLike(bestPostTrigger.slice(0, 180))) return [];
     const snippet = bestPostTrigger.slice(0, 180);
     const results = window.BibleDB.searchVerses(snippet, 'KJV', 2);
     return results
@@ -540,6 +557,148 @@ Return [] if nothing detected. No markdown, no extra text.`;
     }
   }
 
+  // ── Spoken references ────────────────────────────────────────────────────
+  // scripture_parser (Python, in the speech server) reads spoken references
+  // with the context of what came before: "John chapter 3." then "Verse 16.",
+  // "Romans." then "chapter 8 verse 28". It reads spoken numbers ("John three
+  // sixteen" is 3:16, not 19:1), never returns a verse that doesn't exist, and
+  // flags what the speech model may have got wrong ("Kings" with no First or
+  // Second, numbers run together, a reference in a list of book names).
+  // Flagged references are listed for the operator but never shown in Auto mode.
+  const FLAGGED_CONFIDENCE = 0.82;   // above the 0.80 list threshold, below Auto's 0.88
+
+  let serverDown = false;  // the last /detect call failed: use AnchorCast's rules
+
+  function usingServer() {
+    return !!window.electronAPI?.detectReferences && !serverDown;
+  }
+
+  function detectReferences(cleanLine) {
+    const server = window.electronAPI?.detectReferences;
+    if (!server) { legacyReferences(cleanLine); return; }
+    server({ text: cleanLine }).then(res => {
+      serverDown = !res?.ok;
+      if (res?.ok) emitServerReferences(res.references || []);
+      else legacyReferences(cleanLine);
+    }).catch(() => { serverDown = true; legacyReferences(cleanLine); });
+  }
+
+  function emitServerReferences(references) {
+    for (const r of references) {
+      if (!r || !r.book || !r.chapter) continue;  // unresolved: nothing to show
+      const chapterOnly = r.verse == null;
+      const verse = chapterOnly ? 1 : r.verse;
+      const verseText = window.BibleDB?.getVerse(r.book, r.chapter, verse);
+      if (!verseText) continue;
+      emit({
+        book: r.book, chapter: r.chapter, verse,
+        ref: `${r.book} ${r.chapter}:${verse}`,
+        rangeEnd: r.verse_end && r.verse_end !== verse ? r.verse_end : null,
+        text: verseText, type: 'direct',
+        confidence: r.flagged ? FLAGGED_CONFIDENCE : (chapterOnly ? 0.95 : 0.97),
+        flagged: !!r.flagged, reasons: r.reasons || [],
+        _chapterOnly: chapterOnly,
+      });
+      if (!r.flagged) {
+        lastBookChapter = { book: r.book, chapter: r.chapter, timestamp: Date.now() };
+        if (!chapterOnly) lastEmittedVerse = { book: r.book, chapter: r.chapter, verse, timestamp: Date.now() };
+      }
+    }
+  }
+
+  // AnchorCast's own rules, used when the speech server isn't running
+  // (Deepgram, or the web build).
+  function legacyReferences(cleanLine) {
+      // Direct detection always runs — explicit "Book Ch:V" citations are reliable
+      // Also check the join of last 2 lines so references split across lines
+      // (e.g., "Romans" on line 1, "5:12" on line 2) are caught at the boundary.
+      const directLine = detectDirect(cleanLine);
+      const directAll = [...directLine];
+      if (recentLines.length >= 2) {
+        const prevLine = recentLines[recentLines.length - 2];
+        const boundary = prevLine + ' ' + cleanLine;
+        const directBoundary = detectDirect(boundary);
+        const directPrev = detectDirect(prevLine);
+        for (const bd of directBoundary) {
+          // Skip if this book was already detected from either individual line —
+          // prevents false refs when "Revelation" ends line 1 and "2-6" starts line 2
+          if (directLine.some(d => d.book === bd.book)) continue;
+          if (directPrev.some(d => d.book === bd.book)) continue;
+          if (!directAll.some(d => d.book === bd.book && d.chapter === bd.chapter && d.verse === bd.verse)) {
+            directAll.push(bd);
+          }
+        }
+      }
+      for (const d of directAll) {
+        const verseText = window.BibleDB?.getVerse(d.book, d.chapter, d.verse);
+        if (!verseText) continue;
+        emit({ ...d, text: verseText, type: 'direct',
+          confidence: d._chapterOnly ? 0.95 : 0.97 });
+        lastBookChapter = { book: d.book, chapter: d.chapter, timestamp: Date.now() };
+      }
+
+      // ── Orphan verse detection ──────────────────────────────────────────────
+      // When the preacher says "verse 43" or "verse 43 of 44" without naming
+      // a book, connect it to the most recently detected book+chapter context.
+      if (lastBookChapter && (Date.now() - lastBookChapter.timestamp) < LAST_CONTEXT_TTL) {
+        const lower = cleanLine.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        // IMPORTANT: list longer words first (fourteen before four) so the alternation
+        // doesn't match "four" inside "fourteen". \b also guards the boundary.
+        const spokenWord = '(?:eighteen|nineteen|thirteen|fourteen|fifteen|sixteen|seventeen|eleven|twelve|twenty|thirty|forty|fifty|sixty|three|seven|eight|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|four|five|nine|one|two|six|ten)';
+        const numToken = `(?:\\d+|${spokenWord}(?:\\s+${spokenWord})?)`;
+        const orphanRe = new RegExp(`(?:verses?|v\\.?)\\s+(?:number\\s+)?(${numToken})\\b(?:\\s+(?:of|and|to|through)\\s+(${numToken})\\b)?`, 'gi');
+        let om;
+        while ((om = orphanRe.exec(lower)) !== null) {
+          const v1 = wordsToNumber(om[1]?.trim());
+          if (!v1) continue;
+          const v2 = om[2] ? wordsToNumber(om[2].trim()) : null;
+          // Build the list of verses to emit: just v1, or the small range v1..v2
+          const verses = [];
+          if (v2 && v2 > v1 && (v2 - v1) <= 5) {
+            for (let vv = v1; vv <= v2; vv++) verses.push(vv);
+          } else {
+            verses.push(v1);
+          }
+          for (const v of verses) {
+            if (directAll.some(d => d.verse === v && d.book === lastBookChapter.book && d.chapter === lastBookChapter.chapter)) continue;
+            const verseText = window.BibleDB?.getVerse(lastBookChapter.book, lastBookChapter.chapter, v);
+            if (!verseText) continue;
+            emit({
+              book: lastBookChapter.book, chapter: lastBookChapter.chapter, verse: v,
+              ref: `${lastBookChapter.book} ${lastBookChapter.chapter}:${v}`,
+              text: verseText, type: 'direct', confidence: 0.93,
+            });
+          }
+        }
+      }
+
+      // ── "Next verse" / "previous verse" detection ────────────────────────
+      // When the preacher says "next verse", "the following verse", "read on",
+      // etc., advance from the last emitted verse to the next one.
+      if (lastEmittedVerse && (Date.now() - lastEmittedVerse.timestamp) < LAST_CONTEXT_TTL) {
+        const lower = cleanLine.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const nextPat = /\b(?:next verse|the next verse|following verse|the following verse|verse after|read on|let us read on|lets read on|continue reading|read the next|and the next verse|move to the next verse|go to the next verse|look at the next verse)\b/i;
+        const prevPat = /\b(?:previous verse|the previous verse|verse before|go back a verse|back a verse|the verse before)\b/i;
+        const nextMatch = nextPat.test(lower);
+        const prevMatch = !nextMatch && prevPat.test(lower);
+        if (nextMatch || prevMatch) {
+          const delta = nextMatch ? 1 : -1;
+          const newVerse = lastEmittedVerse.verse + delta;
+          if (newVerse >= 1) {
+            const verseText = window.BibleDB?.getVerse(lastEmittedVerse.book, lastEmittedVerse.chapter, newVerse);
+            if (verseText) {
+              emit({
+                book: lastEmittedVerse.book, chapter: lastEmittedVerse.chapter, verse: newVerse,
+                ref: `${lastEmittedVerse.book} ${lastEmittedVerse.chapter}:${newVerse}`,
+                text: verseText, type: 'verbal', confidence: 0.93,
+              });
+              lastBookChapter = { book: lastEmittedVerse.book, chapter: lastEmittedVerse.chapter, timestamp: Date.now() };
+            }
+          }
+        }
+      }
+  }
+
   // ── MAIN: processText ─────────────────────────────────────────────────────
   function processText(text, isOnline) {
     const cleanLine = String(text || '').trim();
@@ -551,94 +710,9 @@ Return [] if nothing detected. No markdown, no extra text.`;
 
     const useAI = !!(apiKey && isOnline !== false && aiEnabled !== false);
 
-    // Direct detection always runs — explicit "Book Ch:V" citations are reliable
-    // Also check the join of last 2 lines so references split across lines
-    // (e.g., "Romans" on line 1, "5:12" on line 2) are caught at the boundary.
-    const directLine = detectDirect(cleanLine);
-    const directAll = [...directLine];
-    if (recentLines.length >= 2) {
-      const prevLine = recentLines[recentLines.length - 2];
-      const boundary = prevLine + ' ' + cleanLine;
-      const directBoundary = detectDirect(boundary);
-      const directPrev = detectDirect(prevLine);
-      for (const bd of directBoundary) {
-        // Skip if this book was already detected from either individual line —
-        // prevents false refs when "Revelation" ends line 1 and "2-6" starts line 2
-        if (directLine.some(d => d.book === bd.book)) continue;
-        if (directPrev.some(d => d.book === bd.book)) continue;
-        if (!directAll.some(d => d.book === bd.book && d.chapter === bd.chapter && d.verse === bd.verse)) {
-          directAll.push(bd);
-        }
-      }
-    }
-    for (const d of directAll) {
-      const verseText = window.BibleDB?.getVerse(d.book, d.chapter, d.verse);
-      if (!verseText) continue;
-      emit({ ...d, text: verseText, type: 'direct',
-        confidence: d._chapterOnly ? 0.95 : 0.97 });
-      lastBookChapter = { book: d.book, chapter: d.chapter, timestamp: Date.now() };
-    }
-
-    // ── Orphan verse detection ──────────────────────────────────────────────
-    // When the preacher says "verse 43" or "verse 43 of 44" without naming
-    // a book, connect it to the most recently detected book+chapter context.
-    if (lastBookChapter && (Date.now() - lastBookChapter.timestamp) < LAST_CONTEXT_TTL) {
-      const lower = cleanLine.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-      // IMPORTANT: list longer words first (fourteen before four) so the alternation
-      // doesn't match "four" inside "fourteen". \b also guards the boundary.
-      const spokenWord = '(?:eighteen|nineteen|thirteen|fourteen|fifteen|sixteen|seventeen|eleven|twelve|twenty|thirty|forty|fifty|sixty|three|seven|eight|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|four|five|nine|one|two|six|ten)';
-      const numToken = `(?:\\d+|${spokenWord}(?:\\s+${spokenWord})?)`;
-      const orphanRe = new RegExp(`(?:verses?|v\\.?)\\s+(?:number\\s+)?(${numToken})\\b(?:\\s+(?:of|and|to|through)\\s+(${numToken})\\b)?`, 'gi');
-      let om;
-      while ((om = orphanRe.exec(lower)) !== null) {
-        const v1 = wordsToNumber(om[1]?.trim());
-        if (!v1) continue;
-        const v2 = om[2] ? wordsToNumber(om[2].trim()) : null;
-        // Build the list of verses to emit: just v1, or the small range v1..v2
-        const verses = [];
-        if (v2 && v2 > v1 && (v2 - v1) <= 5) {
-          for (let vv = v1; vv <= v2; vv++) verses.push(vv);
-        } else {
-          verses.push(v1);
-        }
-        for (const v of verses) {
-          if (directAll.some(d => d.verse === v && d.book === lastBookChapter.book && d.chapter === lastBookChapter.chapter)) continue;
-          const verseText = window.BibleDB?.getVerse(lastBookChapter.book, lastBookChapter.chapter, v);
-          if (!verseText) continue;
-          emit({
-            book: lastBookChapter.book, chapter: lastBookChapter.chapter, verse: v,
-            ref: `${lastBookChapter.book} ${lastBookChapter.chapter}:${v}`,
-            text: verseText, type: 'direct', confidence: 0.93,
-          });
-        }
-      }
-    }
-
-    // ── "Next verse" / "previous verse" detection ────────────────────────
-    // When the preacher says "next verse", "the following verse", "read on",
-    // etc., advance from the last emitted verse to the next one.
-    if (lastEmittedVerse && (Date.now() - lastEmittedVerse.timestamp) < LAST_CONTEXT_TTL) {
-      const lower = cleanLine.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-      const nextPat = /\b(?:next verse|the next verse|following verse|the following verse|verse after|read on|let us read on|lets read on|continue reading|read the next|and the next verse|move to the next verse|go to the next verse|look at the next verse)\b/i;
-      const prevPat = /\b(?:previous verse|the previous verse|verse before|go back a verse|back a verse|the verse before)\b/i;
-      const nextMatch = nextPat.test(lower);
-      const prevMatch = !nextMatch && prevPat.test(lower);
-      if (nextMatch || prevMatch) {
-        const delta = nextMatch ? 1 : -1;
-        const newVerse = lastEmittedVerse.verse + delta;
-        if (newVerse >= 1) {
-          const verseText = window.BibleDB?.getVerse(lastEmittedVerse.book, lastEmittedVerse.chapter, newVerse);
-          if (verseText) {
-            emit({
-              book: lastEmittedVerse.book, chapter: lastEmittedVerse.chapter, verse: newVerse,
-              ref: `${lastEmittedVerse.book} ${lastEmittedVerse.chapter}:${newVerse}`,
-              text: verseText, type: 'verbal', confidence: 0.93,
-            });
-            lastBookChapter = { book: lastEmittedVerse.book, chapter: lastEmittedVerse.chapter, timestamp: Date.now() };
-          }
-        }
-      }
-    }
+    // Spoken references: the speech server's scripture_parser when it is
+    // running, AnchorCast's own rules (legacyReferences) when it isn't.
+    detectReferences(cleanLine);
 
     // Learned phrases always run — user-curated, low false-positive risk
     const windowHash = windowText.length + ':' + windowText.slice(-80);
@@ -680,18 +754,26 @@ Return [] if nothing detected. No markdown, no extra text.`;
       }
     } else {
       // ── OFFLINE MODE: fall back to rule-based methods ──
-      const verbal = detectVerbal(windowText);
-      for (const v of verbal) emit(v);
+      // detectVerbal reads spoken references too; scripture_parser does
+      // that when the speech server is running.
+      if (!usingServer()) {
+        const verbal = detectVerbal(windowText);
+        for (const v of verbal) emit(v);
+      }
 
       const keyword = detectKeyword(cleanLine);
       for (const k of keyword) emit(k);
 
-      debounceTimer = setTimeout(() => {
-        const triggered = detectTriggeredContent(snapshot);
-        for (const t of triggered) emit(t);
-        const contentResults = detectContentSearch(snapshot);
-        for (const c of contentResults) emit(c);
-      }, 3000);
+      // Not after a line of prayer or praise: the window still holds the
+      // lines before it, which matched verses they share words with.
+      if (!isPrayerLike(cleanLine)) {
+        debounceTimer = setTimeout(() => {
+          const triggered = detectTriggeredContent(snapshot);
+          for (const t of triggered) emit(t);
+          const contentResults = detectContentSearch(snapshot);
+          for (const c of contentResults) emit(c);
+        }, 3000);
+      }
     }
   }
 
@@ -704,6 +786,7 @@ Return [] if nothing detected. No markdown, no extra text.`;
     lastWindowHash = '';
     lastBookChapter = null;
     lastEmittedVerse = null;
+    window.electronAPI?.detectReferences?.({ text: '', reset: true }).catch?.(() => {});
   }
 
   async function generateSermonNotes(transcript, title = '', keyOverride = '') {
