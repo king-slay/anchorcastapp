@@ -16,7 +16,7 @@ Internet is needed once, for the setup below; after that the app runs offline.
    git checkout claude/our-reference-parser
    npm.cmd install
    node node_modules\electron\install.js
-   .\setup_whisper.bat
+   .\setup_offline.bat
    ```
 
    Use `npm.cmd` rather than `npm`: Windows often blocks plain `npm` with
@@ -25,23 +25,14 @@ Internet is needed once, for the setup below; after that the app runs offline.
    warning; the `node ... install.js` line runs that step.
    `Test-Path node_modules\electron\dist\electron.exe` should print `True`.
 
-   `setup_whisper.bat` downloads Python 3.12 and faster-whisper into a
-   `python` folder next to the app.
-   If `setup_whisper.bat` stops at "Downloading portable Python", press
-   Ctrl+C and do its steps by hand (this also skips the 480 MB Small model):
+   `setup_offline.bat` downloads Python 3.12 into a `python` folder next to
+   the app, installs faster-whisper and downloads the Tiny English model
+   (about 250 MB in all). For a stronger computer, name the model:
+   `.\setup_offline.bat base.en`. If it stops, run it again; finished steps
+   are skipped. (AnchorCast's own `setup_whisper.bat` does the same with
+   downloads that can stall without a message, and always fetches the
+   480 MB Small model.)
 
-   ```powershell
-   curl.exe -L -o python312.zip https://www.python.org/ftp/python/3.12.8/python-3.12.8-embed-amd64.zip
-   mkdir python
-   tar -xf python312.zip -C python
-   del python312.zip
-   (Get-Content python\python312._pth) -replace '#import site','import site' | Set-Content python\python312._pth
-   curl.exe -L -o get-pip.py https://bootstrap.pypa.io/get-pip.py
-   .\python\python.exe get-pip.py --no-warn-script-location
-   del get-pip.py
-   .\python\python.exe -m pip install faster-whisper --no-warn-script-location
-   .\python\python.exe -c "from faster_whisper import WhisperModel; WhisperModel('tiny.en', device='cpu', compute_type='int8'); print('OK')"
-   ```
 3. Start the app with `npm.cmd start`.
 4. **Speech model:** Settings › AI & Transcription › Local Whisper Model, choose **Tiny English**
    (tiny.en) on a laptop like the Dell, and download it. Use Base or Small

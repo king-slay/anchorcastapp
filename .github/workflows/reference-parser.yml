@@ -26,3 +26,34 @@ jobs:
           node --check src/preload.js
           node --check src/renderer/js/ai-detection.js
           node --check src/renderer/js/electron-shim.js
+
+  speech-setup:
+    # setup_offline.bat on a clean Windows machine, then the speech server
+    # it sets up must answer /detect with our parser.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: setup_offline.bat
+        shell: cmd
+        run: setup_offline.bat
+      - name: setup_offline.bat again (finished steps are skipped)
+        shell: cmd
+        run: setup_offline.bat
+      - name: Speech server answers /detect
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath python\python.exe -PassThru `
+            -ArgumentList 'whisper_server.py','--model','tiny.en','--port','7777' `
+            -RedirectStandardOutput server.log -RedirectStandardError server.err
+          $up = $false
+          for ($i = 0; $i -lt 60 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:7777/health | Out-Null; $up = $true }
+            catch { Start-Sleep 2 }
+          }
+          Get-Content server.log, server.err
+          if (-not $up) { exit 1 }
+          $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:7777/detect `
+            -ContentType 'application/json' -Body '{"text": "John chapter 3 verse 16."}'
+          $r | ConvertTo-Json -Depth 5
+          Stop-Process $p
+          if ($r.references[0].ref -ne 'John 3:16') { exit 1 }
