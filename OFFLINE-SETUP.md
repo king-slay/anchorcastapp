@@ -27,6 +27,21 @@ Internet is needed once, for the setup below; after that the app runs offline.
 
    `setup_whisper.bat` downloads Python 3.12 and faster-whisper into a
    `python` folder next to the app.
+   If `setup_whisper.bat` stops at "Downloading portable Python", press
+   Ctrl+C and do its steps by hand (this also skips the 480 MB Small model):
+
+   ```powershell
+   curl.exe -L -o python312.zip https://www.python.org/ftp/python/3.12.8/python-3.12.8-embed-amd64.zip
+   mkdir python
+   tar -xf python312.zip -C python
+   del python312.zip
+   (Get-Content python\python312._pth) -replace '#import site','import site' | Set-Content python\python312._pth
+   curl.exe -L -o get-pip.py https://bootstrap.pypa.io/get-pip.py
+   .\python\python.exe get-pip.py --no-warn-script-location
+   del get-pip.py
+   .\python\python.exe -m pip install faster-whisper --no-warn-script-location
+   .\python\python.exe -c "from faster_whisper import WhisperModel; WhisperModel('tiny.en', device='cpu', compute_type='int8'); print('OK')"
+   ```
 3. Start the app with `npm.cmd start`.
 4. **Speech model:** Settings › AI & Transcription › Local Whisper Model, choose **Tiny English**
    (tiny.en) on a laptop like the Dell, and download it. Use Base or Small
