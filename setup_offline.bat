@@ -11,6 +11,8 @@ set "MODEL=%~1"
 if "%MODEL%"=="" set "MODEL=tiny.en"
 set "PYTHON_URL=https://www.python.org/ftp/python/3.12.8/python-3.12.8-embed-amd64.zip"
 set "GETPIP_URL=https://bootstrap.pypa.io/get-pip.py"
+:: Where the app looks for speech models (main.js WHISPER_MODEL_DIR).
+set "MODEL_DIR=%APPDATA%\AnchorCast\AnchorCastData\WhisperModels"
 
 if exist "%PY%" goto :pip
 echo [1/4] Downloading Python 3.12 (about 11 MB)...
@@ -32,9 +34,11 @@ echo [3/4] Installing the speech engine (about 150 MB)...
 "%PY%" -m pip install faster-whisper --no-warn-script-location || goto :failed
 
 echo [4/4] Downloading the %MODEL% speech model...
-"%PY%" -c "from faster_whisper import WhisperModel; WhisperModel('%MODEL%', device='cpu', compute_type='int8'); print('[OK] Speech is ready')" || goto :failed
+if not exist "%MODEL_DIR%" mkdir "%MODEL_DIR%"
+"%PY%" -c "from faster_whisper import WhisperModel; import os; WhisperModel('%MODEL%', device='cpu', compute_type='int8', download_root=os.environ['MODEL_DIR']); print('[OK] Speech is ready')" || goto :failed
 echo.
 echo Setup complete. Start the app with:  npm.cmd start
+echo Then choose the same model in Settings, Audio and AI, Local Whisper Model.
 exit /b 0
 
 :failed

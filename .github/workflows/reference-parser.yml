@@ -39,11 +39,15 @@ jobs:
       - name: setup_offline.bat again (finished steps are skipped)
         shell: cmd
         run: setup_offline.bat
-      - name: Speech server answers /detect
+      - name: Speech server answers /detect, using the model where the app looks
         shell: pwsh
         run: |
+          $dir = "$env:APPDATA\AnchorCast\AnchorCastData\WhisperModels"
+          if (-not (Test-Path "$dir\models--Systran--faster-whisper-tiny.en")) { exit 1 }
+          $env:HF_HUB_OFFLINE = '1'  # the model must already be there
           $p = Start-Process -FilePath python\python.exe -PassThru `
-            -ArgumentList 'whisper_server.py','--model','tiny.en','--port','7777' `
+            -ArgumentList 'whisper_server.py','--model','tiny.en','--port','7777',
+              '--model_cache_dir',"$env:APPDATA\AnchorCast\AnchorCastData\WhisperModels" `
             -RedirectStandardOutput server.log -RedirectStandardError server.err
           $up = $false
           for ($i = 0; $i -lt 60 -and -not $up; $i++) {

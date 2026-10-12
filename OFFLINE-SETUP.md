@@ -27,7 +27,7 @@ Internet is needed once, for the setup below; after that the app runs offline.
 
    `setup_offline.bat` downloads Python 3.12 into a `python` folder next to
    the app, installs faster-whisper and downloads the Tiny English model
-   (about 250 MB in all). For a stronger computer, name the model:
+   (about 250 MB in all) into the folder the app reads models from. For a stronger computer, name the model:
    `.\setup_offline.bat base.en`. If it stops, run it again; finished steps
    are skipped. (AnchorCast's own `setup_whisper.bat` does the same with
    downloads that can stall without a message, and always fetches the
