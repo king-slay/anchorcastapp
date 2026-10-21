@@ -4,6 +4,22 @@ All notable changes to **AnchorCast** are documented here.
 
 ---
 
+## [Unreleased] — fork: local setup
+
+### Fixed
+- **Transcription, Remote Control and NDI locked forever** — the email activation they depended on had no mail account configured, so they could never unlock. Registration is now off (`ANCHORCAST_REQUIRE_REGISTRATION=1` brings it back).
+- **No Bible text on a fresh install** — the KJV the app expects in `data/kjv.json` was missing; it is now included (public domain, 31,102 verses).
+- **Build scripts failing** — the Windows and macOS electron-builder configs they call were missing and are restored.
+- **Blank splash screen** — `splash.html` was empty.
+
+### Changed
+- Fonts are bundled, so the operator screen and projector look the same with no internet.
+- Local Whisper loads models from disk without contacting the network, uses greedy decoding and one thread per physical core on CPU.
+- No background update checks; updates, when turned on, come from this fork's releases.
+- Removed duplicate and leftover files and NDI build intermediates; added `.gitignore`.
+
+---
+
 ## [1.7.0] — 2026-09
 
 ### Fixed

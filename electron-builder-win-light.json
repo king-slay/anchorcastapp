@@ -1,0 +1,78 @@
+{
+  "appId": "com.anchorcast.app",
+  "productName": "AnchorCast",
+  "copyright": "Copyright 2026 AnchorCast",
+  "directories": {
+    "output": "dist",
+    "buildResources": "build"
+  },
+  "files": [
+    "src/**/*",
+    "ndi-addon/index.js",
+    "ndi-addon/package.json",
+    "ndi-addon/build/Release/*.node",
+    "ndi-addon/build/Release/*.dll",
+    "ndi-addon/build/Release/*.dylib",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "ndi-addon/**/*",
+    "**/*.node"
+  ],
+  "extraResources": [
+    {
+      "from": "assets",
+      "to": "assets"
+    },
+    {
+      "from": "data",
+      "to": "data"
+    },
+    {
+      "from": "whisper_server.py",
+      "to": "whisper_server.py"
+    },
+    {
+      "from": "setup_whisper.bat",
+      "to": "setup_whisper.bat"
+    },
+    {
+      "from": "python",
+      "to": "python"
+    },
+    {
+      "from": "vc_redist.x64.exe",
+      "to": "vc_redist.x64.exe"
+    }
+  ],
+  "afterPack": "scripts/after-pack.js",
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "king-slay",
+      "repo": "anchorcastapp"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "assets/icon.ico",
+    "artifactName": "AnchorCast-Light_v${version}_Setup.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "AnchorCast",
+    "unicode": true,
+    "warningsAsErrors": false,
+    "include": "installer.nsh"
+  }
+}

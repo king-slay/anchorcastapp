@@ -1,0 +1,77 @@
+{
+  "appId": "com.anchorcast.app",
+  "productName": "AnchorCast",
+  "copyright": "Copyright 2026 AnchorCast",
+  "directories": {
+    "output": "dist",
+    "buildResources": "build"
+  },
+  "files": [
+    "src/**/*",
+    "ndi-addon/index.js",
+    "ndi-addon/package.json",
+    "ndi-addon/build/Release/*.node",
+    "ndi-addon/build/Release/*.dll",
+    "ndi-addon/build/Release/*.dylib",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "ndi-addon/**/*",
+    "**/*.node"
+  ],
+  "extraResources": [
+    {
+      "from": "assets",
+      "to": "assets"
+    },
+    {
+      "from": "data",
+      "to": "data"
+    },
+    {
+      "from": "whisper_server.py",
+      "to": "whisper_server.py"
+    },
+    {
+      "from": "setup_whisper.sh",
+      "to": "setup_whisper.sh"
+    },
+    {
+      "from": "python",
+      "to": "python"
+    }
+  ],
+  "afterPack": "scripts/after-pack.js",
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "king-slay",
+      "repo": "anchorcastapp",
+      "channel": "latest-x64"
+    }
+  ],
+  "afterSign": "scripts/notarize-mac.js",
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "zip",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "assets/icon.png",
+    "category": "public.app-category.productivity",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "artifactName": "AnchorCastUpdate_v${version}_${arch}.${ext}"
+  }
+}

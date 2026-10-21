@@ -45,6 +45,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--model',           default='small.en')
 parser.add_argument('--port',            type=int, default=7777)
 parser.add_argument('--device',          default='auto')
+# 0 = auto: one thread per physical core (logical cores / 2), between 2 and 8.
+parser.add_argument('--cpu_threads',     type=int, default=int(os.environ.get('ANCHORCAST_WHISPER_THREADS', '0')))
+# 0 = auto: greedy (1) on CPU, which keeps up live with no measurable loss on
+# short sermon chunks; 5 on CUDA where the extra search is cheap.
+parser.add_argument('--beam_size',       type=int, default=int(os.environ.get('ANCHORCAST_WHISPER_BEAM', '0')))
 parser.add_argument('--model_cache_dir', default=None,
                     help='Directory to store Whisper models (default: HuggingFace cache)')
 # [SEC-F8] Shared secret: main.js passes --secret <hex> at startup;
@@ -77,17 +82,25 @@ try:
     # int8 on CPU is fastest with negligible quality loss for small/base
     # float16 on CUDA for best GPU throughput
     compute = 'float16' if device == 'cuda' else 'int8'
+    cpu_threads = args.cpu_threads or max(2, min(8, (os.cpu_count() or 4) // 2))
+    BEAM_SIZE = args.beam_size or (5 if device == 'cuda' else 1)
 
     # Use app-specific model directory if provided, otherwise HuggingFace default cache
-    model_kwargs = dict(device=device, compute_type=compute)
+    model_kwargs = dict(device=device, compute_type=compute, cpu_threads=cpu_threads)
     if args.model_cache_dir:
         import os
         os.makedirs(args.model_cache_dir, exist_ok=True)
         model_kwargs['download_root'] = args.model_cache_dir
         print(f'[Whisper] Model cache: {args.model_cache_dir}', flush=True)
 
-    model = WhisperModel(args.model, **model_kwargs)
-    print(f'[Whisper] Model ready — {args.model} on {device} ({compute})', flush=True)
+    # Load from disk first so startup never waits on the network; only a
+    # model that isn't on this machine yet is downloaded.
+    try:
+        model = WhisperModel(args.model, local_files_only=True, **model_kwargs)
+    except Exception:
+        model = WhisperModel(args.model, **model_kwargs)
+    print(f'[Whisper] Model ready — {args.model} on {device} ({compute}, '
+          f'{cpu_threads} threads, beam {BEAM_SIZE})', flush=True)
 except ImportError:
     print('[Whisper] ERROR: faster-whisper not installed.', flush=True)
     print('[Whisper] Run: pip install faster-whisper', flush=True)
@@ -181,7 +194,8 @@ def build_initial_prompt() -> str:
 
 # ── Transcription parameters (tuned per model) ─────────────────────────────────
 # Rules of thumb for CPU-based faster-whisper:
-#   beam_size  : higher = more accurate but slower. 5 is optimal for small.en on CPU.
+#   beam_size  : higher = more accurate but slower. Greedy (1) on CPU keeps
+#                small.en real-time on 4-core machines; see --beam_size.
 #   best_of    : only matters when temperature > 0. Keep 1 when temp=0.
 #   patience   : 1.0 = standard beam search cutoff.
 #   temperature: 0.0 = fully greedy (most stable, no randomness).
@@ -194,7 +208,7 @@ def build_initial_prompt() -> str:
 def _transcribe_params():
     return dict(
         language         = None if IS_EN_MODEL else 'en',
-        beam_size        = 5,
+        beam_size        = BEAM_SIZE,
         best_of          = 1,       # irrelevant at temp=0, keep low to save memory
         patience         = 1.0,
         temperature      = 0.0,
