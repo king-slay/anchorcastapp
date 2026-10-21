@@ -47,6 +47,11 @@ const SMTP_PASS    = 'REPLACE_WITH_APP_PASSWORD';  // Gmail App Password (16 cha
 const FROM_EMAIL   = 'donotreply@anchorcastapp.com';
 const APP_PROTOCOL = 'anchorcast';
 
+// This fork runs fully local: there is no activation server or mail account,
+// so every feature is unlocked. Set ANCHORCAST_REQUIRE_REGISTRATION=1 to
+// bring back the email activation flow.
+const REGISTRATION_REQUIRED = process.env.ANCHORCAST_REQUIRE_REGISTRATION === '1';
+
 function getHardwareId() {
   const raw = `${os.hostname()}|${(os.cpus()[0]?.model||'cpu')}|${os.platform()}|${os.arch()}`;
   return 'GP-' + crypto.createHash('sha256').update(raw).digest('hex').toUpperCase().slice(0,4)
@@ -87,6 +92,9 @@ function saveRegistration(data) {
 
 function getRegistrationStatus() {
   const hwId = getHardwareId();
+  if (!REGISTRATION_REQUIRED) {
+    return { registered: true, hwId, fullName: '', email: '', registeredAt: null, churchName: '', localMode: true };
+  }
   const data = loadRegistration();
   if (data?.registered && data?.token && data?.email) {
     if (verifyRegToken(data.token, data.email, hwId)) {
@@ -2203,8 +2211,12 @@ ipcMain.on('presentation-add-to-schedule', (_evt, payload) => {
 
 // ── Menu ──────────────────────────────────────────────────────────────────────
 // ── Auto-updater ──────────────────────────────────────────────────────────────
-const GITHUB_OWNER = 'anchorcastapp-team';
+// Updates come from this fork's releases, never upstream: an upstream build
+// would replace the fork's changes. Background checks are off so the app
+// stays offline; ANCHORCAST_AUTO_UPDATE=1 turns them back on.
+const GITHUB_OWNER = 'king-slay';
 const GITHUB_REPO  = 'anchorcastapp';
+const AUTO_UPDATE_CHECKS = process.env.ANCHORCAST_AUTO_UPDATE === '1';
 let _manualUpdateCheck = false;
 
 async function checkForUpdatesMac(isManual = false) {
@@ -2249,8 +2261,8 @@ function initWindowsUpdater() {
     autoUpdater.on('download-progress', (p) => { mainWindow?.webContents.send('update-download-progress', { percent: Math.round(p.percent) }); });
     autoUpdater.on('update-downloaded', (info) => { mainWindow?.webContents.send('update-downloaded', { version: info.version }); });
     autoUpdater.on('error', (err) => console.warn('[Updater]', err.message));
-    setTimeout(() => autoUpdater.checkForUpdates().catch(e => console.warn('[Updater]', e.message)), 5000);
-    setInterval(() => autoUpdater.checkForUpdates().catch(e => console.warn('[Updater]', e.message)), 6 * 60 * 60 * 1000);
+    if (AUTO_UPDATE_CHECKS) setTimeout(() => autoUpdater.checkForUpdates().catch(e => console.warn('[Updater]', e.message)), 5000);
+    if (AUTO_UPDATE_CHECKS) setInterval(() => autoUpdater.checkForUpdates().catch(e => console.warn('[Updater]', e.message)), 6 * 60 * 60 * 1000);
     ipcMain.handle('updater-download-now', () => autoUpdater.downloadUpdate().catch(e => ({ error: e.message })));
     ipcMain.handle('updater-install-now', () => autoUpdater.quitAndInstall(false, true));
     ipcMain.handle('updater-check-now', () => autoUpdater.checkForUpdates().catch(e => ({ error: e.message })));
@@ -2271,6 +2283,7 @@ function checkForUpdatesManual() {
 function initAutoUpdater() {
   if (!app.isPackaged) return;
   if (process.platform === 'darwin') {
+    if (!AUTO_UPDATE_CHECKS) return;
     setTimeout(() => checkForUpdatesMac(false), 5000);
     setInterval(() => checkForUpdatesMac(false), 6 * 60 * 60 * 1000);
   } else {
@@ -2389,7 +2402,7 @@ function buildMenu(){
       {type:'separator'},
       {label:'Check for Updates…',click:()=>checkForUpdatesManual()},
       {type:'separator'},
-      {label:'Registration',click:()=>createRegistrationStatusWindow()},
+      ...(REGISTRATION_REQUIRED ? [{label:'Registration',click:()=>createRegistrationStatusWindow()}] : []),
       {label:'About AnchorCast',click:showAbout},
     ]},
   ];
