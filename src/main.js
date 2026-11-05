@@ -6266,6 +6266,25 @@ ipcMain.handle('whisper-reinforce', async (_, { text, ttl = 30 } = {}) => {
     return { ok: false };
   }
 });
+// Bible references in one transcript line, read by scripture_parser in the
+// speech server. { ok: false } when the server isn't running, so the
+// renderer falls back to its own detection.
+ipcMain.handle('whisper-detect', async (_, { text, reset = false } = {}) => {
+  if (!whisperReady) return { ok: false };
+  try {
+    const res = await fetch(`${WHISPER_URL}/detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Whisper-Secret': WHISPER_SECRET },
+      body: JSON.stringify({ text: String(text || '').slice(0, 2000), reset: !!reset }),
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) return { ok: false };
+    const data = await res.json();
+    return { ok: true, references: Array.isArray(data.references) ? data.references : [] };
+  } catch (_) {
+    return { ok: false };
+  }
+});
 // List all models with installed status
 ipcMain.handle('get-whisper-models', () => {
   try { fs.mkdirSync(WHISPER_MODEL_DIR, { recursive: true }); } catch(_) {}

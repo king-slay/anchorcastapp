@@ -134,6 +134,7 @@ contextBridge.exposeInMainWorld('electronAPI',{
   whisperStop:    ()       => ipcRenderer.invoke('whisper-stop'),
   startWhisper:   (model)  => ipcRenderer.invoke('whisper-start', model),
   reinforceWhisper: (data) => ipcRenderer.invoke('whisper-reinforce', data),
+  detectReferences: (data) => ipcRenderer.invoke('whisper-detect', data),
   setWhisperSource: (src)  => ipcRenderer.invoke('set-whisper-source', src),
   whisperDiagnostics: ()   => ipcRenderer.invoke('whisper-diagnostics'),
   runWhisperSetup: ()      => ipcRenderer.invoke('run-whisper-setup'),

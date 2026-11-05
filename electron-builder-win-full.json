@@ -33,6 +33,13 @@
       "to": "whisper_server.py"
     },
     {
+      "from": "scripture_parser",
+      "to": "scripture_parser",
+      "filter": [
+        "**/*.py"
+      ]
+    },
+    {
       "from": "setup_whisper.bat",
       "to": "setup_whisper.bat"
     },

@@ -4,9 +4,10 @@ dist/
 .DS_Store
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Built or downloaded per machine; see README "Build"
-python/
+/python/
 models/
 vc_redist.x64.exe
 
