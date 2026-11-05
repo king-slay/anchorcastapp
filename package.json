@@ -28,8 +28,6 @@
     "prebuild:mac:full:x64": "npm run prepare:build:mac",
     "prebuild:mac:light:arm": "npm run prepare:build:mac",
     "prebuild:mac:light:x64": "npm run prepare:build:mac",
-    "generate-license": "node generate-license.js",
-    "generate": "node generate.js",
     "build:timer": "electron-builder --config electron-builder-timer.json --win",
     "start:timer": "electron src/timer-main.js",
     "build:win:update": "electron-builder --config electron-builder-win-update.json",

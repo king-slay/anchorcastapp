@@ -44,16 +44,26 @@
 
 ---
 
+## 🔧 About this fork
+
+This is a fork of [anchorcastapp-team/anchorcastapp](https://github.com/anchorcastapp-team/anchorcastapp), set up to run fully on the local machine:
+
+- **No registration.** Transcription, Remote Control and NDI work straight away; there is no email activation (set `ANCHORCAST_REQUIRE_REGISTRATION=1` to bring it back).
+- **Offline by default.** The KJV ships in `data/kjv.json` (public domain), the interface fonts ship in `src/renderer/fonts/`, transcription uses local Whisper, and the app makes no update checks unless `ANCHORCAST_AUTO_UPDATE=1` is set. Updates come from this fork's releases, never upstream.
+- **Faster local Whisper.** Greedy decoding and one thread per physical core on CPU. Override with `ANCHORCAST_WHISPER_BEAM` and `ANCHORCAST_WHISPER_THREADS`. On a slow PC choose `base.en` or `tiny.en` in Settings.
+
+Online features stay off until you use them: Deepgram, OpenAI and Claude detection need an API key in Settings, and lyrics search and Bible downloads only go online when you start them.
+
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/anchorcastapp-team/anchorcastapp.git
+git clone https://github.com/king-slay/anchorcastapp.git
 cd anchorcastapp
 npm install
 npm start
 ```
 
-On Windows, double-click `start.bat`.
+On Windows, double-click `start.bat`. For local transcription run `setup_whisper.bat` (Windows) or `setup_whisper.sh` (macOS/Linux) once, with internet, to install Python and faster-whisper.
 
 ---
 
@@ -204,6 +214,7 @@ src/
 ├── timer-main.js              # Standalone AnchorCast Timer entry point
 ├── preload.js                 # Electron IPC bridge (contextBridge)
 └── renderer/
+    ├── fonts/                 # Bundled fonts (offline)
     ├── index.html             # Main operator dashboard
     ├── projection.html        # Projection output window
     ├── countdown-window.html  # Timer control window
@@ -246,7 +257,7 @@ AnchorCast is MIT licensed and open to contributions from developers, designers,
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines and [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ```bash
-git clone https://github.com/anchorcastapp-team/anchorcastapp.git
+git clone https://github.com/king-slay/anchorcastapp.git
 ```
 
 ---
